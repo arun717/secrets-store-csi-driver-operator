@@ -11,6 +11,7 @@ import (
 	"github.com/openshift/secrets-store-csi-driver-operator/test/e2e/common"
 	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/utils/ptr"
 )
 
@@ -161,20 +162,27 @@ var _ = Describe("tokenRequests", Ordered, func() {
 		})
 
 		It("rejects an attempt to revert tokenRequests.type back to Unmanaged", func() {
-			ctx, cancel := withAPITimeout()
-			defer cancel()
-			driver, err := clusterCSIDriverClient.Get(ctx, common.DriverName, metav1.GetOptions{})
-			Expect(err).NotTo(HaveOccurred(), "failed to read ClusterCSIDriver %q before attempting the reverting update", common.DriverName)
+			// Same conflict window as the secretRotation rejection spec:
+			// retry until the error is the CEL rejection, not a stale resourceVersion.
+			err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+				ctx, cancel := withAPITimeout()
+				defer cancel()
+				driver, err := clusterCSIDriverClient.Get(ctx, common.DriverName, metav1.GetOptions{})
+				if err != nil {
+					return err
+				}
 
-			driver.Spec.DriverConfig = opv1.CSIDriverConfigSpec{
-				DriverType: opv1.SecretsStoreDriverType,
-				SecretsStore: opv1.SecretsStoreCSIDriverConfigSpec{
-					TokenRequests: opv1.SecretsStoreTokenRequests{
-						Type: opv1.TokenRequestsUnmanaged,
+				driver.Spec.DriverConfig = opv1.CSIDriverConfigSpec{
+					DriverType: opv1.SecretsStoreDriverType,
+					SecretsStore: opv1.SecretsStoreCSIDriverConfigSpec{
+						TokenRequests: opv1.SecretsStoreTokenRequests{
+							Type: opv1.TokenRequestsUnmanaged,
+						},
 					},
-				},
-			}
-			_, err = clusterCSIDriverClient.Update(ctx, driver, metav1.UpdateOptions{})
+				}
+				_, err = clusterCSIDriverClient.Update(ctx, driver, metav1.UpdateOptions{})
+				return err
+			})
 
 			Expect(err).To(HaveOccurred(), "expected the API server to reject reverting tokenRequests.type from Managed to Unmanaged")
 			Expect(err.Error()).To(ContainSubstring("tokenRequests type cannot be changed from Managed"))
