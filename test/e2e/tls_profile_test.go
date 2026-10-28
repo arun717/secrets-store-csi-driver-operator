@@ -111,10 +111,10 @@ var _ = Describe("TLS profile adherence", Label("tls"), Ordered, func() {
 		pod, err := waitForOperatorReady(ctx)
 		Expect(err).NotTo(HaveOccurred(), "operator not ready before suite")
 		// Ensure baseline logs exist after the probe update (restart if needed).
-		if err := waitForOperatorLogContains(ctx, pod.Name, "leaving --config as-is"); err != nil {
+		if err := waitForOperatorLogContains(ctx, pod, "leaving --config as-is"); err != nil {
 			restarted, rerr := waitForOperatorRestart(ctx, pod.RestartKey)
 			Expect(rerr).NotTo(HaveOccurred(), "baseline Controllercmd default log not found; operator restart failed")
-			Expect(waitForOperatorLogContains(ctx, restarted.Name, "leaving --config as-is")).To(Succeed(),
+			Expect(waitForOperatorLogContains(ctx, restarted, "leaving --config as-is")).To(Succeed(),
 				"baseline Controllercmd default log after restart")
 			pod = restarted
 		}
@@ -273,12 +273,12 @@ var _ = Describe("TLS profile adherence", Label("tls"), Ordered, func() {
 		Expect(updateClusterAPIServerTLSConfig(ctx, tlsProfileIntermediate, configv1.TLSAdherencePolicyStrictAllComponents)).To(Succeed())
 		mid, err := waitForOperatorRestart(ctx, before.RestartKey)
 		Expect(err).NotTo(HaveOccurred(), "restart after Intermediate")
-		Expect(waitForOperatorLogContains(ctx, mid.Name, "minTLSVersion=VersionTLS12")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, mid, "minTLSVersion=VersionTLS12")).To(Succeed())
 
 		Expect(updateClusterAPIServerTLSConfig(ctx, tlsProfileModern, configv1.TLSAdherencePolicyStrictAllComponents)).To(Succeed())
 		after, err := waitForOperatorRestart(ctx, mid.RestartKey)
 		Expect(err).NotTo(HaveOccurred(), "restart after Modern")
-		Expect(waitForOperatorLogContains(ctx, after.Name, "minTLSVersion=VersionTLS13")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, after, "minTLSVersion=VersionTLS13")).To(Succeed())
 		replaced, err := replaceOperatorPod(ctx, after.Name)
 		Expect(err).NotTo(HaveOccurred(), "D1: reset operator restart backoff")
 		lastUID = replaced.UID
@@ -294,12 +294,12 @@ var _ = Describe("TLS profile adherence", Label("tls"), Ordered, func() {
 			Expect(err).NotTo(HaveOccurred())
 			GinkgoWriter.Printf("D2: no restart after Legacy update (restartKey=%s); continuing\n", legacyPod.RestartKey)
 		}
-		Expect(waitForOperatorLogContains(ctx, legacyPod.Name, "leaving --config as-is")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, legacyPod, "leaving --config as-is")).To(Succeed())
 
 		Expect(updateClusterAPIServerTLSConfig(ctx, tlsProfileIntermediate, configv1.TLSAdherencePolicyStrictAllComponents)).To(Succeed())
 		strictPod, err := waitForOperatorRestart(ctx, legacyPod.RestartKey)
 		Expect(err).NotTo(HaveOccurred(), "restart Legacy→Strict")
-		Expect(waitForOperatorLogContains(ctx, strictPod.Name, "Applied cluster TLS profile", "minTLSVersion=VersionTLS12")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, strictPod, "Applied cluster TLS profile", "minTLSVersion=VersionTLS12")).To(Succeed())
 		replaced, err := replaceOperatorPod(ctx, strictPod.Name)
 		Expect(err).NotTo(HaveOccurred(), "D2: reset operator restart backoff")
 		lastUID = replaced.UID
@@ -313,12 +313,12 @@ var _ = Describe("TLS profile adherence", Label("tls"), Ordered, func() {
 		Expect(updateClusterAPIServerTLSConfig(ctx, tlsProfileModern, configv1.TLSAdherencePolicyStrictAllComponents)).To(Succeed())
 		strictPod, err := waitForOperatorRestart(ctx, before.RestartKey)
 		Expect(err).NotTo(HaveOccurred(), "restart after Modern+Strict")
-		Expect(waitForOperatorLogContains(ctx, strictPod.Name, "Applied cluster TLS profile", "minTLSVersion=VersionTLS13")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, strictPod, "Applied cluster TLS profile", "minTLSVersion=VersionTLS13")).To(Succeed())
 
 		Expect(updateClusterAPIServerTLSConfig(ctx, tlsProfileModern, configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly)).To(Succeed())
 		legacyPod, err := waitForOperatorRestart(ctx, strictPod.RestartKey)
 		Expect(err).NotTo(HaveOccurred(), "restart Strict→Legacy")
-		Expect(waitForOperatorLogContains(ctx, legacyPod.Name, "leaving --config as-is")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, legacyPod, "leaving --config as-is")).To(Succeed())
 		replaced, err := replaceOperatorPod(ctx, legacyPod.Name)
 		Expect(err).NotTo(HaveOccurred(), "D3: reset operator restart backoff")
 		lastUID = replaced.UID
@@ -353,7 +353,7 @@ var _ = Describe("TLS profile adherence", Label("tls"), Ordered, func() {
 		Expect(waitForServingCertSecret(ctx, servingCertSecretName)).To(Succeed(), "service-ca did not recreate the serving cert secret")
 		after, err := waitForOperatorRestart(ctx, before.RestartKey)
 		Expect(err).NotTo(HaveOccurred(), "operator did not restart after serving-cert delete")
-		Expect(waitForOperatorLogContains(ctx, after.Name, "Using service-serving-cert provided certificates")).To(Succeed())
+		Expect(waitForOperatorLogContains(ctx, after, "Using service-serving-cert provided certificates")).To(Succeed())
 		replaced, err := replaceOperatorPod(ctx, after.Name)
 		Expect(err).NotTo(HaveOccurred(), "D5: reset operator restart backoff")
 		lastUID = replaced.UID
@@ -587,7 +587,7 @@ func runTLSScenario(ctx context.Context, tc tlsScenario, lastUID *string) {
 	}
 
 	if len(tc.logContains) > 0 {
-		err := waitForOperatorLogContains(ctx, pod.Name, tc.logContains...)
+		err := waitForOperatorLogContains(ctx, pod, tc.logContains...)
 		if err != nil {
 			logs, _ := operatorLogs(ctx, pod.Name)
 			Fail(fmt.Sprintf("logs missing %v: %v\n--- logs ---\n%s", tc.logContains, err, truncate(logs, 4000)))
@@ -612,12 +612,12 @@ func runTLSScenario(ctx context.Context, tc tlsScenario, lastUID *string) {
 		// Retried: a freshly restarted operator pod may take a moment for
 		// its metrics server to start serving. If the retry budget is
 		// exhausted, dump network diagnostics before failing.
-		if dialErr := waitForDialTLS(ctx, pod.Name, tls.VersionTLS12, tls.VersionTLS13); dialErr != nil {
+		if dialErr := waitForDialTLS(ctx, pod, tls.VersionTLS12, tls.VersionTLS13); dialErr != nil {
 			dumpNetworkDiagnostics(ctx, pod)
 			Fail(fmt.Sprintf("HTTPS dial localhost:8443 in pod %s: %v", pod.Name, dialErr))
 		}
 	case wireModernTLS13Only:
-		Expect(waitForDialTLS(ctx, pod.Name, tls.VersionTLS13, tls.VersionTLS13)).To(Succeed(), "TLS1.3 dial should succeed")
+		Expect(waitForDialTLS(ctx, pod, tls.VersionTLS13, tls.VersionTLS13)).To(Succeed(), "TLS1.3 dial should succeed")
 		// Expected to fail (protocol version rejection, not a network drop):
 		// a single attempt is correct here, retrying would just waste time.
 		Expect(dialTLS(ctx, pod.Name, tls.VersionTLS12, tls.VersionTLS12)).NotTo(Succeed(), "TLS1.2 dial should fail under Modern profile")

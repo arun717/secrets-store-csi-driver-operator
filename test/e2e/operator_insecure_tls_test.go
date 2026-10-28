@@ -64,18 +64,29 @@ func dialTLS(ctx context.Context, podName string, minVersion, maxVersion uint16)
 }
 
 // waitForDialTLS retries dialTLS for wireRetryTimeout. A freshly restarted
-// operator pod may take a moment for its metrics server to start serving;
-// this retry loop tolerates that startup delay.
-func waitForDialTLS(ctx context.Context, podName string, minVersion, maxVersion uint16) error {
+// operator pod may take a moment for its metrics server to start serving.
+// If that pod is replaced while the retry is in progress, later attempts
+// follow the ready replacement (see operatorPodForWireCheck) and pod is
+// updated so the caller deletes the pod that was actually dialed.
+func waitForDialTLS(ctx context.Context, pod *operatorPod, minVersion, maxVersion uint16) error {
+	if pod == nil {
+		return fmt.Errorf("operator pod is nil")
+	}
 	var lastErr error
 	err := wait.PollUntilContextTimeout(ctx, pollInterval, wireRetryTimeout, true, func(ctx context.Context) (bool, error) {
-		if lastErr = dialTLS(ctx, podName, minVersion, maxVersion); lastErr != nil {
+		current, resolveErr := operatorPodForWireCheck(ctx, pod)
+		if resolveErr != nil {
+			lastErr = resolveErr
+			return false, nil
+		}
+		*pod = *current
+		if lastErr = dialTLS(ctx, pod.Name, minVersion, maxVersion); lastErr != nil {
 			return false, nil
 		}
 		return true, nil
 	})
 	if err != nil {
-		return fmt.Errorf("failed to dial localhost:8443 in pod %s within %s: %w", podName, wireRetryTimeout, lastErr)
+		return fmt.Errorf("failed to dial localhost:8443 in pod %s within %s: %w", pod.Name, wireRetryTimeout, lastErr)
 	}
 	return nil
 }

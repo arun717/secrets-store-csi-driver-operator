@@ -324,9 +324,34 @@ func operatorLogs(ctx context.Context, podName string) (content string, err erro
 	return string(b), nil
 }
 
-func waitForOperatorLogContains(ctx context.Context, podName string, substrings ...string) error {
+// operatorPodForWireCheck returns the pod a log or TLS exec should target.
+// The TLS watcher restarts the operator in place, which keeps the pod name.
+// The same ReplicaSet can still replace that pod while a check is retrying
+// (the previous pod is deleted and a new one is created). A missing or
+// terminating pod is followed to the current ready pod so the retry does
+// not spend its budget on a name that will never come back.
+func operatorPodForWireCheck(ctx context.Context, current *operatorPod) (*operatorPod, error) {
+	if current != nil && current.Name != "" {
+		pod, err := kubeClient.CoreV1().Pods(operatorNamespace).Get(ctx, current.Name, metav1.GetOptions{})
+		if err != nil && !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		if err == nil && pod.DeletionTimestamp == nil && pod.Status.Phase == corev1.PodRunning {
+			return current, nil
+		}
+		GinkgoWriter.Printf("operator pod %s is gone; following the ready replacement\n", current.Name)
+	}
+	return getOperatorPod(ctx)
+}
+
+func waitForOperatorLogContains(ctx context.Context, pod *operatorPod, substrings ...string) error {
 	return wait.PollUntilContextTimeout(ctx, pollInterval, operatorTimeout, true, func(ctx context.Context) (bool, error) {
-		logs, err := operatorLogs(ctx, podName)
+		current, err := operatorPodForWireCheck(ctx, pod)
+		if err != nil {
+			return false, nil
+		}
+		*pod = *current
+		logs, err := operatorLogs(ctx, pod.Name)
 		if err != nil {
 			return false, nil
 		}
